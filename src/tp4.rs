@@ -50,6 +50,7 @@ impl Maze {
         node: MazeContainer,
         list: &mut Vec<String>,
         work: &mut Arc<Mutex<Vec<MazeContainer>>>,
+        counter: &mut Arc<Mutex<i32>>,
     ) {
         match self {
             Maze::Branch(b) => {
@@ -60,17 +61,22 @@ impl Maze {
                     b.left
                         .lock()
                         .unwrap()
-                        .explore(Arc::clone(&b.left), list, work);
+                        .explore(Arc::clone(&b.left), list, work, counter);
                 } else if b.status == Exploration::PartialExplored {
                     b.status = Exploration::Explored;
                     b.right
                         .lock()
                         .unwrap()
-                        .explore(Arc::clone(&b.right), list, work);
+                        .explore(Arc::clone(&b.right), list, work, counter);
+                } else {
+                    let mut num = counter.lock().unwrap();
+                    *num -= 1;
                 }
             }
             Maze::Leaf(l) => {
                 list.push(l.clone());
+                let mut num = counter.lock().unwrap();
+                *num -= 1;
             }
         }
     }
@@ -88,19 +94,30 @@ pub fn maze_solver_tp4() {
     let branch0 = Branch::from(String::from("0"), &branch1, &branch6);
 
     let work = Arc::new(Mutex::new(vec![Arc::clone(&branch0)]));
+    let counter = Arc::new(Mutex::new(0));
     let mut handles = vec![];
-    while let Some(node) = work.lock().unwrap().pop() {
-        let a_work = Arc::clone(&work);
-        let handle = thread::spawn(move || {
-            let mut trace: Vec<String> = vec![];
-            node.lock()
-                .unwrap()
-                .explore(Arc::clone(&node), &mut trace, &mut Arc::clone(&a_work));
+    loop {
+        let num = Arc::clone(&counter);
+        if work.lock().unwrap().is_empty() && *num.lock().unwrap() == 0 {
+            // Boucler tant que tous les threads ne sont pas terminés, et que la pile 'work' n'est pas vide
+            break;
+        } else if let Some(node) = work.lock().unwrap().pop() {
+            let a_work = Arc::clone(&work);
+            let mut c_num = Arc::clone(&num);
+            *c_num.lock().unwrap() += 1;
+            let handle = thread::spawn(move || {
+                let mut trace: Vec<String> = vec![];
+                node.lock().unwrap().explore(
+                    Arc::clone(&node),
+                    &mut trace,
+                    &mut Arc::clone(&a_work),
+                    &mut Arc::clone(&c_num),
+                );
 
-            println!("{:?}", trace);
-        });
-        thread::sleep(Duration::new(1, 0));
-        handles.push(handle);
+                println!("{:?}", trace);
+            });
+            handles.push(handle);
+        }
     }
     for handle in handles {
         handle.join().unwrap();
